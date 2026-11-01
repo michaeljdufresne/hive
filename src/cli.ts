@@ -743,10 +743,10 @@ async function cmdLead(argv: string[]): Promise<void> {
     }
 
     const executableProblem = leadExecutableProblem(leadCommand, project.path);
-    const requireLaunchExecutable = () => {
+    const requireLaunchExecutable = (identity?: { tmux_target: string; tmux_socket: string; pane_pid: string }) => {
       if (!executableProblem) return;
-      const existing = db.prepare(
-        "SELECT tmux_target, tmux_socket, pane_pid FROM agents WHERE project_id = ? AND kind = 'lead' AND status = 'running' ORDER BY id",
+      const existing = identity ?? db.prepare(
+        "SELECT tmux_target, tmux_socket, pane_pid FROM agents WHERE project_id = ? AND kind = 'lead' AND (status = 'running' OR (status = 'closed' AND actor_id != '')) ORDER BY (status = 'running') DESC, CASE WHEN status = 'running' THEN id ELSE -id END LIMIT 1",
       ).get(project.id) as { tmux_target: string; tmux_socket: string; pane_pid: string } | undefined;
       if (existing && rowOwnership(existing) === "live" && adoptableWindow(session, project.id, existing.tmux_target)) return;
       throw new Error(`hive lead: ${executableProblem}`);
@@ -877,7 +877,7 @@ async function cmdLead(argv: string[]): Promise<void> {
       let leadPane: string;
       let leadWindow: string;
       let createdPane: boolean;
-      requireLaunchExecutable();
+      requireLaunchExecutable(previousIdentity);
       const started = ensureSession(session, project.path, { envFlags, command: launchCommand });
       if (started.created) {
         const claimed = claimInitialWindow(started, windowName, project.id);

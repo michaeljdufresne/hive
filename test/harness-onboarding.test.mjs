@@ -157,7 +157,7 @@ describe("lead executable preflight", () => {
 });
 
 
-it("adopts an owned live lead after its executable is removed, but refuses to restart it", { skip: !hasTmux }, async () => {
+it("adopts running and closed owned live leads after executable removal, but refuses to restart them", { skip: !hasTmux }, async () => {
   const f = fixture();
   const command = makeFakeClaude(f.tmp)("sleep 600");
   writeFileSync(join(f.projectDir, "hive.yml"), `lead: ${command}\n`);
@@ -173,6 +173,15 @@ it("adopts an owned live lead after its executable is removed, but refuses to re
   assert.equal(adopted.code, 0, adopted.stdout + adopted.stderr);
   assert.equal(leadRow(db, project.id).tmux_target, original.tmux_target);
   assert.equal(leadRow(db, project.id).pane_pid, original.pane_pid);
+  db.prepare("UPDATE agents SET status = 'closed', closed_at = datetime('now') WHERE id = ?").run(original.id);
+  const recovered = await runCli(["lead", "--detach"], opts);
+  assert.equal(recovered.code, 0, recovered.stdout + recovered.stderr);
+  const recoveredRow = db.prepare("SELECT * FROM agents WHERE project_id = ? AND kind = 'lead' AND status = 'running'").get(project.id);
+  assert.ok(recoveredRow);
+  assert.notEqual(recoveredRow.id, original.id);
+  assert.equal(recoveredRow.actor_id, original.actor_id);
+  assert.equal(recoveredRow.tmux_target, original.tmux_target);
+  assert.equal(recoveredRow.pane_pid, original.pane_pid);
   cleanup(sessionName());
   const restart = await runCli(["lead", "--detach"], opts);
   assert.notEqual(restart.code, 0);
